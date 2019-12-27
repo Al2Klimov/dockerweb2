@@ -37,7 +37,7 @@ LoadConfig:
 					"parent": watchPath, "child": event.Name, "op": jsonableStringer{event.Op},
 				}).Trace("Got FS event")
 
-				if event.Name == configPath {
+				if event.Op&^fsnotify.Chmod != 0 && event.Name == configPath {
 					continue LoadConfig
 				}
 			case errWa := <-watcher.Errors:
