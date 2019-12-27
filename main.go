@@ -15,7 +15,20 @@ func main() {
 
 LoadConfig:
 	for {
-		loadConfig()
+		if config, ok := loadConfig(); ok {
+			if config.Log.Level == "" {
+				config.Log.Level = "info"
+			}
+
+			if level, errPL := log.ParseLevel(config.Log.Level); errPL == nil {
+				log.WithFields(log.Fields{"old": log.GetLevel(), "new": level}).Trace("Changing log level")
+				log.SetLevel(level)
+			} else {
+				log.WithFields(log.Fields{
+					"bad_level": config.Log.Level, "did_you_mean": jsonableBadLogLevelAlt{config.Log.Level},
+				}).Error("Bad log level")
+			}
+		}
 
 		for {
 			select {
