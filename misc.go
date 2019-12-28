@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ var noInterrupt sync.RWMutex
 var background = context.Background()
 var publicRepos = github.RepositoryListByOrgOptions{Type: "public"}
 var execSemaphore = semaphore.NewWeighted(int64(runtime.GOMAXPROCS(0)) * 2)
+var versionTag = regexp.MustCompile(`\Av?(\d+(?:\.\d+)*)\z`)
 
 var logLevels = func() *lev.ClosestMatch {
 	asStrs := make([]string, 0, len(log.AllLevels))

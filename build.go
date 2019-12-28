@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/google/go-github/v28/github"
+	"github.com/hashicorp/go-version"
 	log "github.com/sirupsen/logrus"
 	"io/ioutil"
 	"os"
@@ -22,8 +23,8 @@ func build(config *githubConfig, patterns map[string]*regexp.Regexp) {
 		return
 	}
 
-	chFramework := make(chan bool, 1)
-	chMods := make(chan bool, 1)
+	chFramework := make(chan gitRepo, 1)
+	chMods := make(chan map[string]gitRepo, 1)
 
 	go fetchGit(fmt.Sprintf("https://github.com/%s.git", config.Framework), frameworkPath, chFramework)
 	go fetchMods(config.Mods, patterns, chMods)
@@ -45,7 +46,11 @@ func mkDir(dir string) bool {
 	return true
 }
 
-func fetchGit(remote, local string, done chan<- bool) {
+type gitRepo struct {
+	remote, latestTag, commit string
+}
+
+func fetchGit(remote, local string, res chan<- gitRepo) {
 	log.WithFields(log.Fields{"remote": remote, "local": local}).Info("Fetching Git repo")
 
 	if _, errSt := os.Stat(local); errSt != nil {
@@ -54,39 +59,81 @@ func fetchGit(remote, local string, done chan<- bool) {
 
 			git := mkTemp()
 			if git == "" {
-				done <- false
+				res <- gitRepo{}
 				return
 			}
 
 			defer rmDir(git, log.TraceLevel)
 
 			if _, ok := runCmd(git, "git", "init", "--bare"); !ok {
-				done <- false
+				res <- gitRepo{}
 				return
 			}
 
 			if _, ok := runCmd(git, "git", "remote", "add", "--mirror=fetch", "--", "origin", remote); !ok {
-				done <- false
+				res <- gitRepo{}
 				return
 			}
 
 			if !rename(git, local) {
-				done <- false
+				res <- gitRepo{}
 				return
 			}
 		} else {
 			log.WithFields(log.Fields{"path": local, "error": jsonableError{errSt}}).Error("Stat error")
-			done <- false
+			res <- gitRepo{}
 			return
 		}
 	}
 
-	_, ok := runCmd(local, "git", "fetch", "origin")
-	done <- ok
-	return
+	if _, ok := runCmd(local, "git", "fetch", "origin"); !ok {
+		res <- gitRepo{}
+		return
+	}
+
+	tags, ok := runCmd(local, "git", "tag")
+	if !ok {
+		res <- gitRepo{}
+		return
+	}
+
+	latestTag := "HEAD"
+
+	{
+		latestVersion := (*version.Version)(nil)
+		for _, line := range bytes.Split(tags, []byte{'\n'}) {
+			if match := versionTag.FindSubmatch(line); match != nil {
+				ver, errNV := version.NewVersion(string(match[1]))
+				if errNV != nil {
+					log.WithFields(log.Fields{
+						"bad_version": string(match[1]), "error": jsonableError{errNV},
+					}).Warn("Something is wrong with a version")
+					continue
+				}
+
+				if latestVersion == nil || ver.GreaterThan(latestVersion) {
+					latestVersion = ver
+					latestTag = string(line)
+				}
+			}
+		}
+	}
+
+	log.WithFields(log.Fields{"remote": remote, "tag": latestTag}).Trace("Got latest tag")
+
+	latestTagCommit, ok := runCmd(local, "git", "log", "-1", "--format=%H", latestTag)
+	if !ok {
+		res <- gitRepo{}
+		return
+	}
+
+	latestTagCommit = bytes.TrimSpace(latestTagCommit)
+	log.WithFields(log.Fields{"remote": remote, "commit": string(latestTagCommit)}).Trace("Got latest tag's commit")
+
+	res <- gitRepo{remote, latestTag, string(latestTagCommit)}
 }
 
-func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp, done chan<- bool) {
+func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp, res chan<- map[string]gitRepo) {
 	gh := github.NewClient(nil)
 	chOrgs := make(chan organization, len(mods))
 
@@ -107,7 +154,7 @@ func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp, done chan<-
 		}
 
 		if !ok {
-			done <- false
+			res <- nil
 			return
 		}
 	}
@@ -145,19 +192,31 @@ func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp, done chan<-
 			entries = nil
 		} else {
 			log.WithFields(log.Fields{"path": modsPath, "error": jsonableError{errRD}}).Error("Couldn't list dir")
-			done <- false
+			res <- nil
 			return
 		}
 	}
 
-	chUpd := make(chan bool, 1)
+	chUpd := make(chan map[string]gitRepo, 1)
 	chRm := make(chan struct{})
 
 	go updateMods(modGits, chUpd)
 	go rmObsolete(modGits, entries, chRm)
 
+	updated := <-chUpd
+
+	byRepo := make(map[[2]string]gitRepo, len(updated))
+	for dir, repo := range updated {
+		byRepo[modGits[dir]] = repo
+	}
+
+	byName := make(map[string]gitRepo, len(byRepo))
+	for mod, repo := range reposOfMods {
+		byName[mod] = byRepo[repo]
+	}
+
 	<-chRm
-	done <- <-chUpd
+	res <- byName
 }
 
 type organization struct {
@@ -186,16 +245,21 @@ func fetchOrg(gh *github.Client, org string, res chan<- organization) {
 	res <- organization{org, names}
 }
 
-func updateMods(expected map[string][2]string, done chan<- bool) {
+func updateMods(expected map[string][2]string, res chan<- map[string]gitRepo) {
 	if !mkDir(modsPath) {
-		done <- false
+		res <- nil
 		return
 	}
 
-	chGit := make(chan bool, len(expected))
-	for _, repo := range expected {
+	remotes := make(map[string]string, len(expected))
+	chGit := make(chan gitRepo, len(expected))
+
+	for mod, repo := range expected {
+		remote := fmt.Sprintf("https://github.com/%s/%s.git", repo[0], repo[1])
+		remotes[remote] = mod
+
 		go fetchGit(
-			fmt.Sprintf("https://github.com/%s/%s.git", repo[0], repo[1]),
+			remote,
 			path.Join(modsPath, fmt.Sprintf(
 				"%s_%s", hex.EncodeToString([]byte(repo[0])), hex.EncodeToString([]byte(repo[1])),
 			)),
@@ -204,13 +268,21 @@ func updateMods(expected map[string][2]string, done chan<- bool) {
 	}
 
 	ok := true
+	mods := make(map[string]gitRepo, len(expected))
+
 	for range expected {
-		if !<-chGit {
+		if repo := <-chGit; repo == (gitRepo{}) {
 			ok = false
+		} else {
+			mods[remotes[repo.remote]] = repo
 		}
 	}
 
-	done <- ok
+	if !ok {
+		mods = nil
+	}
+
+	res <- mods
 }
 
 func rmObsolete(expected map[string][2]string, actual []os.FileInfo, done chan<- struct{}) {
