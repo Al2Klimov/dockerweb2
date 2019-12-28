@@ -119,6 +119,8 @@ LoadConfig:
 					timer, timerCh = prepareSleep(nextBuild.Sub(now))
 				} else {
 					log.Info("Building")
+
+					// TODO
 					build(&config.GitHub, patterns)
 
 					nextBuild = schedule.Next(time.Now())

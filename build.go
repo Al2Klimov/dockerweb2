@@ -17,10 +17,10 @@ import (
 	"sync"
 )
 
-func build(config *githubConfig, patterns map[string]*regexp.Regexp) {
+func build(config *githubConfig, patterns map[string]*regexp.Regexp) []byte {
 	rmDir(tempDir, log.InfoLevel)
 	if !mkDir(tempDir) {
-		return
+		return nil
 	}
 
 	chFramework := make(chan gitRepo, 1)
@@ -29,10 +29,59 @@ func build(config *githubConfig, patterns map[string]*regexp.Regexp) {
 	go fetchGit(fmt.Sprintf("https://github.com/%s.git", config.Framework), frameworkPath, chFramework)
 	go fetchMods(config.Mods, patterns, chMods)
 
-	<-chFramework
-	<-chMods
+	framework := <-chFramework
+	mods := <-chMods
 
-	// TODO
+	if framework == (gitRepo{}) || mods == nil {
+		return nil
+	}
+
+	var buf bytes.Buffer
+
+	fmt.Fprintf(
+		&buf,
+		`#!/bin/sh
+set -exo pipefail
+
+rm -rf dockerweb2-temp
+git clone --bare '%s' dockerweb2-temp
+# %s
+git -C dockerweb2-temp archive --prefix=icingaweb2/ %s |tar -x
+`,
+		framework.remote, framework.latestTag, framework.commit,
+	)
+
+	{
+		sortedMods := make([]string, 0, len(mods))
+		for mod := range mods {
+			sortedMods = append(sortedMods, mod)
+		}
+
+		sort.Strings(sortedMods)
+
+		for _, mod := range sortedMods {
+			repo := mods[mod]
+
+			fmt.Fprintf(
+				&buf,
+				`
+if [ ! -e 'icingaweb2/modules/%s' ]; then
+	rm -rf dockerweb2-temp
+	git clone --bare '%s' dockerweb2-temp
+	# %s
+	git -C dockerweb2-temp archive '--prefix=icingaweb2/modules/%s/' %s |tar -x
+fi
+`,
+				mod, repo.remote, repo.latestTag, mod, repo.commit,
+			)
+		}
+	}
+
+	fmt.Fprint(&buf, `
+rm -rf dockerweb2-temp
+`)
+
+	return buf.Bytes()
 }
 
 func mkDir(dir string) bool {
