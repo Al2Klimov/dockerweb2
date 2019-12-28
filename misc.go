@@ -8,12 +8,19 @@ import (
 	log "github.com/sirupsen/logrus"
 	"os"
 	"os/signal"
+	"path"
 	"strings"
+	"sync"
 	"syscall"
 )
 
 const watchPath = "./"
 const configPath = "config.yml"
+const frameworkPath = "framework"
+const tempDir = "tmp"
+
+var tempChild = path.Join(tempDir, "*")
+var noInterrupt sync.RWMutex
 
 var logLevels = func() *lev.ClosestMatch {
 	asStrs := make([]string, 0, len(log.AllLevels))
@@ -56,6 +63,10 @@ func (jblla jsonableBadLogLevelAlt) MarshalText() (text []byte, err error) {
 	return []byte(logLevels.Closest(strings.ToLower(jblla.badLogLevel))), nil
 }
 
+type githubConfig struct {
+	Framework string `yaml:"framework"`
+}
+
 type configuration struct {
 	Log struct {
 		Level string `yaml:"level"`
@@ -63,12 +74,14 @@ type configuration struct {
 	Build struct {
 		Every string `yaml:"every"`
 	} `yaml:"build"`
+	GitHub githubConfig `yaml:"github"`
 }
 
 func initLogging() {
 	log.SetFormatter(&log.JSONFormatter{})
 	log.SetOutput(os.Stdout)
 	log.SetLevel(log.TraceLevel)
+	log.StandardLogger().ExitFunc = exit
 }
 
 func wait4term() {
@@ -79,5 +92,12 @@ func wait4term() {
 	log.WithFields(log.Fields{"signals": signals}).Trace("Listening for signals")
 
 	log.WithFields(log.Fields{"signal": <-ch}).Warn("Terminating")
-	os.Exit(0)
+	exit(0)
+}
+
+func exit(code int) {
+	log.Debug("Waiting for all uninterruptable operations to finish")
+	noInterrupt.Lock()
+
+	os.Exit(code)
 }

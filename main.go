@@ -18,6 +18,7 @@ func main() {
 
 LoadConfig:
 	for {
+		var config *configuration
 		var ok bool
 		var level log.Level
 		var schedule cron.Schedule
@@ -26,7 +27,6 @@ LoadConfig:
 		var timerCh <-chan time.Time = nil
 
 		{
-			var config configuration
 			if config, ok = loadConfig(); ok {
 				if config.Log.Level == "" {
 					config.Log.Level = "info"
@@ -55,6 +55,11 @@ LoadConfig:
 						ok = false
 					}
 				}
+
+				if strings.TrimSpace(config.GitHub.Framework) == "" {
+					log.Error("Icinga Web 2 repository missing")
+					ok = false
+				}
 			}
 		}
 
@@ -76,9 +81,9 @@ LoadConfig:
 					timer, timerCh = prepareSleep(nextBuild.Sub(now))
 				} else {
 					log.Info("Building")
-					// TODO
+					build(config.GitHub)
 
-					nextBuild = schedule.Next(nextBuild)
+					nextBuild = schedule.Next(time.Now())
 
 					log.WithFields(log.Fields{"next_build": nextBuild}).Info("Scheduling next build")
 					timer, timerCh = prepareSleep(nextBuild.Sub(now))
@@ -119,7 +124,7 @@ func mkWatcher() *fsnotify.Watcher {
 	return watcher
 }
 
-func loadConfig() (config configuration, ok bool) {
+func loadConfig() (config *configuration, ok bool) {
 	log.WithFields(log.Fields{"path": configPath}).Info("Loading config")
 
 	raw, errRF := ioutil.ReadFile(configPath)
@@ -128,7 +133,8 @@ func loadConfig() (config configuration, ok bool) {
 		return
 	}
 
-	if errYU := yaml.Unmarshal(raw, &config); errYU != nil {
+	config = &configuration{}
+	if errYU := yaml.Unmarshal(raw, config); errYU != nil {
 		log.WithFields(log.Fields{"path": configPath, "error": jsonableError{errYU}}).Error("Couldn't parse config")
 		return
 	}
