@@ -8,9 +8,11 @@ import (
 	"github.com/robfig/cron/v3"
 	lev "github.com/schollz/closestmatch/levenshtein"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/semaphore"
 	"os"
 	"os/signal"
 	"path"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -19,12 +21,14 @@ import (
 const watchPath = "./"
 const configPath = "config.yml"
 const frameworkPath = "framework"
+const modsPath = "mods"
 const tempDir = "tmp"
 
 var tempChild = path.Join(tempDir, "*")
 var noInterrupt sync.RWMutex
 var background = context.Background()
 var publicRepos = github.RepositoryListByOrgOptions{Type: "public"}
+var execSemaphore = semaphore.NewWeighted(int64(runtime.GOMAXPROCS(0)) * 2)
 
 var logLevels = func() *lev.ClosestMatch {
 	asStrs := make([]string, 0, len(log.AllLevels))
