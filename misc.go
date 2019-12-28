@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding"
 	"fmt"
+	"github.com/google/go-github/v28/github"
 	"github.com/robfig/cron/v3"
 	lev "github.com/schollz/closestmatch/levenshtein"
 	log "github.com/sirupsen/logrus"
@@ -21,6 +23,8 @@ const tempDir = "tmp"
 
 var tempChild = path.Join(tempDir, "*")
 var noInterrupt sync.RWMutex
+var background = context.Background()
+var publicRepos = github.RepositoryListByOrgOptions{Type: "public"}
 
 var logLevels = func() *lev.ClosestMatch {
 	asStrs := make([]string, 0, len(log.AllLevels))
@@ -63,8 +67,14 @@ func (jblla jsonableBadLogLevelAlt) MarshalText() (text []byte, err error) {
 	return []byte(logLevels.Closest(strings.ToLower(jblla.badLogLevel))), nil
 }
 
+type modConfig struct {
+	Org   string   `yaml:"org"`
+	Repos []string `yaml:"repos"`
+}
+
 type githubConfig struct {
-	Framework string `yaml:"framework"`
+	Framework string      `yaml:"framework"`
+	Mods      []modConfig `yaml:"mods"`
 }
 
 type configuration struct {

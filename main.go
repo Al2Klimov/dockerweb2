@@ -6,6 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -25,6 +26,7 @@ LoadConfig:
 		var nextBuild time.Time
 		var timer *time.Timer = nil
 		var timerCh <-chan time.Time = nil
+		patterns := map[string]*regexp.Regexp{}
 
 		{
 			if config, ok = loadConfig(); ok {
@@ -60,6 +62,42 @@ LoadConfig:
 					log.Error("Icinga Web 2 repository missing")
 					ok = false
 				}
+
+				for i, mod := range config.GitHub.Mods {
+					if strings.TrimSpace(mod.Org) == "" {
+						log.WithFields(log.Fields{"mods_idx": i}).Error("Organization missing")
+						ok = false
+					}
+
+					if len(mod.Repos) == 0 {
+						log.WithFields(log.Fields{"mods_idx": i}).Error("Repository patterns missing")
+						ok = false
+					} else {
+						for _, repo := range mod.Repos {
+							if _, ok := patterns[repo]; !ok {
+								if rgx, errRC := regexp.Compile(repo); errRC == nil {
+									if rgx.NumSubexp() == 1 {
+										patterns[repo] = rgx
+									} else {
+										log.WithFields(log.Fields{
+											"bad_pattern": repo, "subpatterns": rgx.NumSubexp(),
+										}).Error("Repository pattern with not exactly one subpattern")
+
+										patterns[repo] = nil
+										ok = false
+									}
+								} else {
+									log.WithFields(log.Fields{
+										"bad_pattern": repo, "error": jsonableError{errRC},
+									}).Error("Bad repository pattern")
+
+									patterns[repo] = nil
+									ok = false
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 
@@ -81,7 +119,7 @@ LoadConfig:
 					timer, timerCh = prepareSleep(nextBuild.Sub(now))
 				} else {
 					log.Info("Building")
-					build(config.GitHub)
+					build(&config.GitHub, patterns)
 
 					nextBuild = schedule.Next(time.Now())
 

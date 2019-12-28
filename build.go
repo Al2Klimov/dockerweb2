@@ -3,20 +3,29 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"github.com/google/go-github/v28/github"
 	log "github.com/sirupsen/logrus"
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"regexp"
+	"sort"
+	"strings"
 )
 
-func build(config githubConfig) {
+func build(config *githubConfig, patterns map[string]*regexp.Regexp) {
 	if !resetTempDir() {
 		return
 	}
 
-	if !fetchFramework(config.Framework) {
-		return
-	}
+	chFramework := make(chan bool, 1)
+	chMods := make(chan bool, 1)
+
+	go fetchFramework(config.Framework, chFramework)
+	go fetchMods(config.Mods, patterns, chMods)
+
+	<-chFramework
+	<-chMods
 
 	// TODO
 }
@@ -38,7 +47,7 @@ func resetTempDir() bool {
 	return true
 }
 
-func fetchFramework(repo string) bool {
+func fetchFramework(repo string, done chan<- bool) {
 	log.WithFields(log.Fields{"path": frameworkPath}).Info("Fetching Icinga Web 2 itself")
 
 	if _, errSt := os.Stat(frameworkPath); errSt != nil {
@@ -47,13 +56,15 @@ func fetchFramework(repo string) bool {
 
 			frameworkGit := mkTemp()
 			if frameworkGit == "" {
-				return false
+				done <- false
+				return
 			}
 
 			defer rmTemp(frameworkGit)
 
 			if _, ok := runCmd(frameworkGit, "git", "init", "--bare"); !ok {
-				return false
+				done <- false
+				return
 			}
 
 			{
@@ -63,21 +74,99 @@ func fetchFramework(repo string) bool {
 					"origin", fmt.Sprintf("https://github.com/%s.git", repo),
 				)
 				if !ok {
-					return false
+					done <- false
+					return
 				}
 			}
 
 			if !rename(frameworkGit, frameworkPath) {
-				return false
+				done <- false
+				return
 			}
 		} else {
 			log.WithFields(log.Fields{"path": frameworkPath, "error": jsonableError{errSt}}).Error("Stat error")
-			return false
+			done <- false
+			return
 		}
 	}
 
 	_, ok := runCmd(frameworkPath, "git", "fetch", "origin")
-	return ok
+	done <- ok
+	return
+}
+
+func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp, done chan<- bool) {
+	gh := github.NewClient(nil)
+	chOrgs := make(chan organization, len(mods))
+
+	for _, mod := range mods {
+		go fetchOrg(gh, mod.Org, chOrgs)
+	}
+
+	repos := make(map[string][]string, len(mods))
+	ok := true
+
+	for range mods {
+		if res := <-chOrgs; res.repos == nil {
+			ok = false
+		} else {
+			repos[res.name] = res.repos
+		}
+	}
+
+	if !ok {
+		done <- false
+		return
+	}
+
+	reposOfMods := map[string][2]string{}
+
+	for _, mod := range mods {
+		ourRepos := repos[mod.Org]
+
+		for _, repo := range mod.Repos {
+			rgx := patterns[repo]
+
+			for _, ourRepo := range ourRepos {
+				if match := rgx.FindStringSubmatch(ourRepo); match != nil && strings.TrimSpace(match[1]) != "" {
+					if _, ok := reposOfMods[match[1]]; !ok {
+						reposOfMods[match[1]] = [2]string{mod.Org, ourRepo}
+					}
+				}
+			}
+		}
+	}
+
+	// TODO
+	log.WithFields(log.Fields{"mods": reposOfMods}).Debug()
+
+	done <- ok
+}
+
+type organization struct {
+	name  string
+	repos []string
+}
+
+func fetchOrg(gh *github.Client, org string, res chan<- organization) {
+	log.WithFields(log.Fields{"org": org}).Info("Fetching repos of GitHub organization")
+
+	repos, _, errLR := gh.Repositories.ListByOrg(background, org, &publicRepos)
+	if errLR != nil {
+		log.WithFields(log.Fields{
+			"org": org, "error": jsonableError{errLR},
+		}).Error("Couldn't fetch repos of GitHub organization")
+
+		res <- organization{}
+	}
+
+	names := make([]string, 0, len(repos))
+	for _, repo := range repos {
+		names = append(names, *repo.Name)
+	}
+
+	sort.Strings(names)
+	res <- organization{org, names}
 }
 
 func mkTemp() string {
