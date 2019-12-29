@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding"
 	"fmt"
-	"github.com/google/go-github/v28/github"
 	"github.com/robfig/cron/v3"
 	lev "github.com/schollz/closestmatch/levenshtein"
 	log "github.com/sirupsen/logrus"
@@ -32,7 +31,6 @@ const githubSuffix = ".git"
 var tempChild = path.Join(tempDir, "*")
 var noInterrupt sync.RWMutex
 var background = context.Background()
-var publicRepos = github.RepositoryListByOrgOptions{Type: "public"}
 var execSemaphore = semaphore.NewWeighted(int64(runtime.GOMAXPROCS(0)) * 2)
 var versionTag = regexp.MustCompile(`\Av?(\d+(?:\.\d+)*)\z`)
 
@@ -78,7 +76,7 @@ func (jblla jsonableBadLogLevelAlt) MarshalText() (text []byte, err error) {
 }
 
 type modConfig struct {
-	Org   string   `yaml:"org"`
+	User  string   `yaml:"user"`
 	Repos []string `yaml:"repos"`
 }
 

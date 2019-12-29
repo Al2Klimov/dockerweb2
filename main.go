@@ -64,7 +64,7 @@ LoadConfig:
 				}
 
 				for i, mod := range config.GitHub.Mods {
-					if strings.TrimSpace(mod.Org) == "" {
+					if strings.TrimSpace(mod.User) == "" {
 						log.WithFields(log.Fields{"mods_idx": i}).Error("Organization missing")
 						ok = false
 					}

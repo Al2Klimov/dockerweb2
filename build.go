@@ -181,10 +181,10 @@ func fetchGit(remote, local string, res chan<- gitRepo) {
 
 func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp) map[string]string {
 	gh := github.NewClient(nil)
-	chOrgs := make(chan organization, len(mods))
+	chUsers := make(chan githubUser, len(mods))
 
 	for _, mod := range mods {
-		go fetchOrg(gh, mod.Org, chOrgs)
+		go fetchUser(gh, mod.User, chUsers)
 	}
 
 	repos := make(map[string][]string, len(mods))
@@ -192,7 +192,7 @@ func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp) map[string]
 	{
 		ok := true
 		for range mods {
-			if res := <-chOrgs; res.repos == nil {
+			if res := <-chUsers; res.repos == nil {
 				ok = false
 			} else {
 				repos[res.name] = res.repos
@@ -207,7 +207,7 @@ func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp) map[string]
 	reposOfMods := map[string]string{}
 
 	for _, mod := range mods {
-		ourRepos := repos[mod.Org]
+		ourRepos := repos[mod.User]
 
 		for _, repo := range mod.Repos {
 			rgx := patterns[repo]
@@ -215,7 +215,7 @@ func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp) map[string]
 			for _, ourRepo := range ourRepos {
 				if match := rgx.FindStringSubmatch(ourRepo); match != nil && strings.TrimSpace(match[1]) != "" {
 					if _, ok := reposOfMods[match[1]]; !ok {
-						reposOfMods[match[1]] = fmt.Sprintf("%s/%s", mod.Org, ourRepo)
+						reposOfMods[match[1]] = fmt.Sprintf("%s/%s", mod.User, ourRepo)
 					}
 				}
 			}
@@ -225,30 +225,46 @@ func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp) map[string]
 	return reposOfMods
 }
 
-type organization struct {
+type githubUser struct {
 	name  string
 	repos []string
 }
 
-func fetchOrg(gh *github.Client, org string, res chan<- organization) {
-	log.WithFields(log.Fields{"org": org}).Info("Fetching repos of GitHub organization")
+func fetchUser(gh *github.Client, user string, res chan<- githubUser) {
+	log.WithFields(log.Fields{"user": user}).Info("Fetching repos of GitHub user")
 
-	repos, _, errLR := gh.Repositories.ListByOrg(background, org, &publicRepos)
-	if errLR != nil {
-		log.WithFields(log.Fields{
-			"org": org, "error": jsonableError{errLR},
-		}).Error("Couldn't fetch repos of GitHub organization")
+	var names []string
 
-		res <- organization{}
-	}
+	{
+		var opts = github.RepositoryListOptions{
+			Visibility:  "public",
+			ListOptions: github.ListOptions{PerPage: 100, Page: 1},
+		}
 
-	names := make([]string, 0, len(repos))
-	for _, repo := range repos {
-		names = append(names, *repo.Name)
+		for {
+			repos, _, errLR := gh.Repositories.List(background, user, &opts)
+			if errLR != nil {
+				log.WithFields(log.Fields{
+					"user": user, "error": jsonableError{errLR},
+				}).Error("Couldn't fetch repos of GitHub user")
+
+				res <- githubUser{}
+			}
+
+			for _, repo := range repos {
+				names = append(names, *repo.Name)
+			}
+
+			if len(repos) < opts.PerPage {
+				break
+			}
+
+			opts.Page++
+		}
 	}
 
 	sort.Strings(names)
-	res <- organization{org, names}
+	res <- githubUser{user, names}
 }
 
 func updateMirrors(expected map[string]string, res chan<- map[string]gitRepo) {
