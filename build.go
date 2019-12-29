@@ -23,24 +23,38 @@ func build(config *githubConfig, patterns map[string]*regexp.Regexp) []byte {
 		return nil
 	}
 
-	chFramework := make(chan gitRepo, 1)
-	chMods := make(chan map[string]gitRepo, 1)
+	mods := fetchMods(config.Mods, patterns)
+	if mods == nil {
+		return nil
+	}
 
-	go fetchGit(fmt.Sprintf("https://github.com/%s.git", config.Framework), frameworkPath, chFramework)
-	go fetchMods(config.Mods, patterns, chMods)
+	reposByDir := make(map[string]string, 1+len(mods))
+	reposByDir[hex.EncodeToString([]byte(config.Framework))] = config.Framework
 
-	framework := <-chFramework
-	mods := <-chMods
+	for _, repo := range mods {
+		reposByDir[hex.EncodeToString([]byte(repo))] = repo
+	}
 
-	if framework == (gitRepo{}) || mods == nil {
+	chUpd := make(chan map[string]gitRepo, 1)
+	chRm := make(chan struct{})
+
+	go updateMirrors(reposByDir, chUpd)
+	go rmObsolete(reposByDir, chRm)
+
+	defer waitFor(chRm)
+
+	updated := <-chUpd
+	if updated == nil {
 		return nil
 	}
 
 	var buf bytes.Buffer
 
-	fmt.Fprintf(
-		&buf,
-		`#!/bin/sh
+	{
+		framework := updated[config.Framework]
+		fmt.Fprintf(
+			&buf,
+			`#!/bin/sh
 set -exo pipefail
 
 rm -rf dockerweb2-temp
@@ -48,8 +62,9 @@ git clone --bare '%s' dockerweb2-temp
 # %s
 git -C dockerweb2-temp archive --prefix=icingaweb2/ %s |tar -x
 `,
-		framework.remote, framework.latestTag, framework.commit,
-	)
+			framework.remote, framework.latestTag, framework.commit,
+		)
+	}
 
 	{
 		sortedMods := make([]string, 0, len(mods))
@@ -60,8 +75,7 @@ git -C dockerweb2-temp archive --prefix=icingaweb2/ %s |tar -x
 		sort.Strings(sortedMods)
 
 		for _, mod := range sortedMods {
-			repo := mods[mod]
-
+			repo := updated[mods[mod]]
 			fmt.Fprintf(
 				&buf,
 				`
@@ -182,7 +196,7 @@ func fetchGit(remote, local string, res chan<- gitRepo) {
 	res <- gitRepo{remote, latestTag, string(latestTagCommit)}
 }
 
-func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp, res chan<- map[string]gitRepo) {
+func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp) map[string]string {
 	gh := github.NewClient(nil)
 	chOrgs := make(chan organization, len(mods))
 
@@ -203,12 +217,11 @@ func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp, res chan<- 
 		}
 
 		if !ok {
-			res <- nil
-			return
+			return nil
 		}
 	}
 
-	reposOfMods := map[string][2]string{}
+	reposOfMods := map[string]string{}
 
 	for _, mod := range mods {
 		ourRepos := repos[mod.Org]
@@ -219,53 +232,14 @@ func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp, res chan<- 
 			for _, ourRepo := range ourRepos {
 				if match := rgx.FindStringSubmatch(ourRepo); match != nil && strings.TrimSpace(match[1]) != "" {
 					if _, ok := reposOfMods[match[1]]; !ok {
-						reposOfMods[match[1]] = [2]string{mod.Org, ourRepo}
+						reposOfMods[match[1]] = fmt.Sprintf("%s/%s", mod.Org, ourRepo)
 					}
 				}
 			}
 		}
 	}
 
-	modGits := map[string][2]string{}
-	for _, repo := range reposOfMods {
-		modGits[fmt.Sprintf(
-			"%s_%s", hex.EncodeToString([]byte(repo[0])), hex.EncodeToString([]byte(repo[1])),
-		)] = repo
-	}
-
-	log.WithFields(log.Fields{"path": modsPath}).Trace("Listing dir")
-
-	entries, errRD := ioutil.ReadDir(modsPath)
-	if errRD != nil {
-		if os.IsNotExist(errRD) {
-			entries = nil
-		} else {
-			log.WithFields(log.Fields{"path": modsPath, "error": jsonableError{errRD}}).Error("Couldn't list dir")
-			res <- nil
-			return
-		}
-	}
-
-	chUpd := make(chan map[string]gitRepo, 1)
-	chRm := make(chan struct{})
-
-	go updateMods(modGits, chUpd)
-	go rmObsolete(modGits, entries, chRm)
-
-	updated := <-chUpd
-
-	byRepo := make(map[[2]string]gitRepo, len(updated))
-	for dir, repo := range updated {
-		byRepo[modGits[dir]] = repo
-	}
-
-	byName := make(map[string]gitRepo, len(byRepo))
-	for mod, repo := range reposOfMods {
-		byName[mod] = byRepo[repo]
-	}
-
-	<-chRm
-	res <- byName
+	return reposOfMods
 }
 
 type organization struct {
@@ -294,56 +268,56 @@ func fetchOrg(gh *github.Client, org string, res chan<- organization) {
 	res <- organization{org, names}
 }
 
-func updateMods(expected map[string][2]string, res chan<- map[string]gitRepo) {
-	if !mkDir(modsPath) {
+func updateMirrors(expected map[string]string, res chan<- map[string]gitRepo) {
+	if !mkDir(gitMirrorPath) {
 		res <- nil
 		return
 	}
 
-	remotes := make(map[string]string, len(expected))
 	chGit := make(chan gitRepo, len(expected))
-
-	for mod, repo := range expected {
-		remote := fmt.Sprintf("https://github.com/%s/%s.git", repo[0], repo[1])
-		remotes[remote] = mod
-
-		go fetchGit(
-			remote,
-			path.Join(modsPath, fmt.Sprintf(
-				"%s_%s", hex.EncodeToString([]byte(repo[0])), hex.EncodeToString([]byte(repo[1])),
-			)),
-			chGit,
-		)
+	for dir, repo := range expected {
+		go fetchGit(githubPrefix+repo+githubSuffix, path.Join(gitMirrorPath, dir), chGit)
 	}
 
 	ok := true
-	mods := make(map[string]gitRepo, len(expected))
+	mirrors := make(map[string]gitRepo, len(expected))
 
 	for range expected {
 		if repo := <-chGit; repo == (gitRepo{}) {
 			ok = false
 		} else {
-			mods[remotes[repo.remote]] = repo
+			mirrors[strings.TrimSuffix(strings.TrimPrefix(repo.remote, githubPrefix), githubSuffix)] = repo
 		}
 	}
 
 	if !ok {
-		mods = nil
+		mirrors = nil
 	}
 
-	res <- mods
+	res <- mirrors
 }
 
-func rmObsolete(expected map[string][2]string, actual []os.FileInfo, done chan<- struct{}) {
+func rmObsolete(expected map[string]string, done chan<- struct{}) {
 	defer close(done)
+
+	log.WithFields(log.Fields{"path": gitMirrorPath}).Trace("Listing dir")
+
+	entries, errRD := ioutil.ReadDir(gitMirrorPath)
+	if errRD != nil {
+		if !os.IsNotExist(errRD) {
+			log.WithFields(log.Fields{"path": gitMirrorPath, "error": jsonableError{errRD}}).Error("Couldn't list dir")
+		}
+
+		return
+	}
 
 	var wg sync.WaitGroup
 
-	for _, entry := range actual {
+	for _, entry := range entries {
 		name := entry.Name()
 		if _, ok := expected[name]; !ok {
 			wg.Add(1)
-			go rmOne(path.Join(modsPath, name), &wg)
+			go rmOne(path.Join(gitMirrorPath, name), &wg)
 		}
 	}
 

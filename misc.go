@@ -21,9 +21,10 @@ import (
 
 const watchPath = "./"
 const configPath = "config.yml"
-const frameworkPath = "framework"
-const modsPath = "mods"
+const gitMirrorPath = "mirrors"
 const tempDir = "tmp"
+const githubPrefix = "https://github.com/"
+const githubSuffix = ".git"
 
 var tempChild = path.Join(tempDir, "*")
 var noInterrupt sync.RWMutex
@@ -116,4 +117,8 @@ func exit(code int) {
 	noInterrupt.Lock()
 
 	os.Exit(code)
+}
+
+func waitFor(ch <-chan struct{}) {
+	<-ch
 }
