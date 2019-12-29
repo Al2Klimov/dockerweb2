@@ -27,7 +27,7 @@ func deploy(config *deployConfig, script []byte) {
 
 			defer rmDir(git, log.TraceLevel)
 
-			if _, ok := runCmd("", "git", append(gitConfig, "clone", "--", config.Remote, git)...); !ok {
+			if _, ok := runCmd("git", append(gitConfig, "clone", "--", config.Remote, git)...); !ok {
 				return
 			}
 
@@ -41,17 +41,20 @@ func deploy(config *deployConfig, script []byte) {
 	}
 
 	{
-		_, ok := runCmd(deployGitPath, "git", append(gitConfig, "remote", "set-url", "--", "origin", config.Remote)...)
+		_, ok := runCmd(
+			"git",
+			append(gitConfig, "-C", deployGitPath, "remote", "set-url", "--", "origin", config.Remote)...,
+		)
 		if !ok {
 			return
 		}
 	}
 
-	if _, ok := runCmd(deployGitPath, "git", append(gitConfig, "reset", "--hard")...); !ok {
+	if _, ok := runCmd("git", append(gitConfig, "-C", deployGitPath, "reset", "--hard")...); !ok {
 		return
 	}
 
-	if _, ok := runCmd(deployGitPath, "git", append(gitConfig, "pull", "--rebase")...); !ok {
+	if _, ok := runCmd("git", append(gitConfig, "-C", deployGitPath, "pull", "--rebase")...); !ok {
 		return
 	}
 
@@ -59,13 +62,13 @@ func deploy(config *deployConfig, script []byte) {
 		return
 	}
 
-	if _, ok := runCmd(deployGitPath, "git", append(gitConfig, "add", "--", config.Script)...); !ok {
+	if _, ok := runCmd("git", append(gitConfig, "-C", deployGitPath, "add", "--", config.Script)...); !ok {
 		return
 	}
 
-	if status, ok := runCmd(deployGitPath, "git", append(gitConfig, "status", "-s")...); ok {
+	if status, ok := runCmd("git", append(gitConfig, "-C", deployGitPath, "status", "-s")...); ok {
 		if len(status) > 0 {
-			if _, ok := runCmd(deployGitPath, "git", append(gitConfig, "commit", "-m", config.Commit)...); !ok {
+			if _, ok := runCmd("git", append(gitConfig, "-C", deployGitPath, "commit", "-m", config.Commit)...); !ok {
 				return
 			}
 		}
@@ -73,7 +76,7 @@ func deploy(config *deployConfig, script []byte) {
 		return
 	}
 
-	runCmd(deployGitPath, "git", append(gitConfig, "push")...)
+	runCmd("git", append(gitConfig, "-C", deployGitPath, "push")...)
 }
 
 func writeFile(path string, content []byte) bool {

@@ -111,12 +111,12 @@ func fetchGit(remote, local string, res chan<- gitRepo) {
 
 			defer rmDir(git, log.TraceLevel)
 
-			if _, ok := runCmd(git, "git", "init", "--bare"); !ok {
+			if _, ok := runCmd("git", "-C", git, "init", "--bare"); !ok {
 				res <- gitRepo{}
 				return
 			}
 
-			if _, ok := runCmd(git, "git", "remote", "add", "--mirror=fetch", "--", "origin", remote); !ok {
+			if _, ok := runCmd("git", "-C", git, "remote", "add", "--mirror=fetch", "--", "origin", remote); !ok {
 				res <- gitRepo{}
 				return
 			}
@@ -132,12 +132,12 @@ func fetchGit(remote, local string, res chan<- gitRepo) {
 		}
 	}
 
-	if _, ok := runCmd(local, "git", "fetch", "origin"); !ok {
+	if _, ok := runCmd("git", "-C", local, "fetch", "origin"); !ok {
 		res <- gitRepo{}
 		return
 	}
 
-	tags, ok := runCmd(local, "git", "tag")
+	tags, ok := runCmd("git", "-C", local, "tag")
 	if !ok {
 		res <- gitRepo{}
 		return
@@ -167,7 +167,7 @@ func fetchGit(remote, local string, res chan<- gitRepo) {
 
 	log.WithFields(log.Fields{"remote": remote, "tag": latestTag}).Trace("Got latest tag")
 
-	latestTagCommit, ok := runCmd(local, "git", "log", "-1", "--format=%H", latestTag)
+	latestTagCommit, ok := runCmd("git", "-C", local, "log", "-1", "--format=%H", latestTag)
 	if !ok {
 		res <- gitRepo{}
 		return

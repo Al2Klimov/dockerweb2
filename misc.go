@@ -149,18 +149,17 @@ func rmDir(dir string, logLevel log.Level) {
 	}
 }
 
-func runCmd(wd, name string, arg ...string) (stdout []byte, ok bool) {
+func runCmd(name string, arg ...string) (stdout []byte, ok bool) {
 	cmd := exec.Command(name, arg...)
 	var out, err bytes.Buffer
 
-	cmd.Dir = wd
 	cmd.Stdout = &out
 	cmd.Stderr = &err
 
 	noInterrupt.RLock()
 	execSemaphore.Acquire(background, 1)
 
-	log.WithFields(log.Fields{"exe": name, "args": arg, "dir": wd}).Debug("Running command")
+	log.WithFields(log.Fields{"exe": name, "args": arg}).Debug("Running command")
 	errRn := cmd.Run()
 
 	execSemaphore.Release(1)
@@ -168,7 +167,7 @@ func runCmd(wd, name string, arg ...string) (stdout []byte, ok bool) {
 
 	if errRn != nil {
 		log.WithFields(log.Fields{
-			"exe": name, "args": arg, "dir": wd, "error": jsonableError{errRn},
+			"exe": name, "args": arg, "error": jsonableError{errRn},
 			"stdout": jsonableStringer{&out}, "stderr": jsonableStringer{&err},
 		}).Error("Command failed")
 
