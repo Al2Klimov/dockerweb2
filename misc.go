@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path"
 	"regexp"
@@ -22,6 +24,7 @@ import (
 const watchPath = "./"
 const configPath = "config.yml"
 const gitMirrorPath = "mirrors"
+const deployGitPath = "deploy"
 const tempDir = "tmp"
 const githubPrefix = "https://github.com/"
 const githubSuffix = ".git"
@@ -84,6 +87,13 @@ type githubConfig struct {
 	Mods      []modConfig `yaml:"mods"`
 }
 
+type deployConfig struct {
+	Remote string            `yaml:"remote"`
+	Config map[string]string `yaml:"config"`
+	Script string            `yaml:"script"`
+	Commit string            `yaml:"commit"`
+}
+
 type configuration struct {
 	Log struct {
 		Level string `yaml:"level"`
@@ -92,6 +102,7 @@ type configuration struct {
 		Every string `yaml:"every"`
 	} `yaml:"build"`
 	GitHub githubConfig `yaml:"github"`
+	Deploy deployConfig `yaml:"deploy"`
 }
 
 func initLogging() {
@@ -117,6 +128,65 @@ func exit(code int) {
 	noInterrupt.Lock()
 
 	os.Exit(code)
+}
+
+func mkDir(dir string) bool {
+	log.WithFields(log.Fields{"path": dir}).Debug("Creating dir")
+
+	if errMA := os.MkdirAll(dir, 0700); errMA != nil {
+		log.WithFields(log.Fields{"path": dir, "error": jsonableError{errMA}}).Error("Couldn't create dir")
+		return false
+	}
+
+	return true
+}
+
+func rmDir(dir string, logLevel log.Level) {
+	log.WithFields(log.Fields{"path": dir}).Log(logLevel, "Removing dir")
+
+	if errRA := os.RemoveAll(dir); errRA != nil {
+		log.WithFields(log.Fields{"path": dir, "error": jsonableError{errRA}}).Warn("Couldn't remove dir")
+	}
+}
+
+func runCmd(wd, name string, arg ...string) (stdout []byte, ok bool) {
+	cmd := exec.Command(name, arg...)
+	var out, err bytes.Buffer
+
+	cmd.Dir = wd
+	cmd.Stdout = &out
+	cmd.Stderr = &err
+
+	noInterrupt.RLock()
+	execSemaphore.Acquire(background, 1)
+
+	log.WithFields(log.Fields{"exe": name, "args": arg, "dir": wd}).Debug("Running command")
+	errRn := cmd.Run()
+
+	execSemaphore.Release(1)
+	noInterrupt.RUnlock()
+
+	if errRn != nil {
+		log.WithFields(log.Fields{
+			"exe": name, "args": arg, "dir": wd, "error": jsonableError{errRn},
+			"stdout": jsonableStringer{&out}, "stderr": jsonableStringer{&err},
+		}).Error("Command failed")
+
+		return nil, false
+	}
+
+	return out.Bytes(), true
+}
+
+func rename(old, new string) bool {
+	log.WithFields(log.Fields{"old": old, "new": new}).Trace("Renaming")
+
+	if errRn := os.Rename(old, new); errRn != nil {
+		log.WithFields(log.Fields{"old": old, "new": new, "error": jsonableError{errRn}}).Error("Couldn't rename")
+		return false
+	}
+
+	return true
 }
 
 func waitFor(ch <-chan struct{}) {

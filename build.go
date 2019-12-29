@@ -9,7 +9,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path"
 	"regexp"
 	"sort"
@@ -18,11 +17,6 @@ import (
 )
 
 func build(config *githubConfig, patterns map[string]*regexp.Regexp) []byte {
-	rmDir(tempDir, log.InfoLevel)
-	if !mkDir(tempDir) {
-		return nil
-	}
-
 	mods := fetchMods(config.Mods, patterns)
 	if mods == nil {
 		return nil
@@ -96,17 +90,6 @@ rm -rf dockerweb2-temp
 `)
 
 	return buf.Bytes()
-}
-
-func mkDir(dir string) bool {
-	log.WithFields(log.Fields{"path": dir}).Debug("Creating dir")
-
-	if errMA := os.MkdirAll(dir, 0700); errMA != nil {
-		log.WithFields(log.Fields{"path": dir, "error": jsonableError{errMA}}).Error("Couldn't create dir")
-		return false
-	}
-
-	return true
 }
 
 type gitRepo struct {
@@ -329,14 +312,6 @@ func rmOne(dir string, wg *sync.WaitGroup) {
 	rmDir(dir, log.InfoLevel)
 }
 
-func rmDir(dir string, logLevel log.Level) {
-	log.WithFields(log.Fields{"path": dir}).Log(logLevel, "Removing dir")
-
-	if errRA := os.RemoveAll(dir); errRA != nil {
-		log.WithFields(log.Fields{"path": dir, "error": jsonableError{errRA}}).Warn("Couldn't remove dir")
-	}
-}
-
 func mkTemp() string {
 	log.WithFields(log.Fields{"path": tempChild}).Trace("Creating temp dir")
 
@@ -347,44 +322,4 @@ func mkTemp() string {
 	}
 
 	return dir
-}
-
-func runCmd(wd, name string, arg ...string) (stdout []byte, ok bool) {
-	cmd := exec.Command(name, arg...)
-	var out, err bytes.Buffer
-
-	cmd.Dir = wd
-	cmd.Stdout = &out
-	cmd.Stderr = &err
-
-	noInterrupt.RLock()
-	execSemaphore.Acquire(background, 1)
-
-	log.WithFields(log.Fields{"exe": name, "args": arg, "dir": wd}).Debug("Running command")
-	errRn := cmd.Run()
-
-	execSemaphore.Release(1)
-	noInterrupt.RUnlock()
-
-	if errRn != nil {
-		log.WithFields(log.Fields{
-			"exe": name, "args": arg, "dir": wd, "error": jsonableError{errRn},
-			"stdout": jsonableStringer{&out}, "stderr": jsonableStringer{&err},
-		}).Error("Command failed")
-
-		return nil, false
-	}
-
-	return out.Bytes(), true
-}
-
-func rename(old, new string) bool {
-	log.WithFields(log.Fields{"old": old, "new": new}).Trace("Renaming")
-
-	if errRn := os.Rename(old, new); errRn != nil {
-		log.WithFields(log.Fields{"old": old, "new": new, "error": jsonableError{errRn}}).Error("Couldn't rename")
-		return false
-	}
-
-	return true
 }

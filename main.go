@@ -98,6 +98,21 @@ LoadConfig:
 						}
 					}
 				}
+
+				if strings.TrimSpace(config.Deploy.Remote) == "" {
+					log.Error("Deploy repository missing")
+					ok = false
+				}
+
+				if strings.TrimSpace(config.Deploy.Script) == "" {
+					log.Error("Deploy path missing")
+					ok = false
+				}
+
+				if strings.TrimSpace(config.Deploy.Commit) == "" {
+					log.Error("Deploy commit message missing")
+					ok = false
+				}
 			}
 		}
 
@@ -118,10 +133,14 @@ LoadConfig:
 				if now.Before(nextBuild) {
 					timer, timerCh = prepareSleep(nextBuild.Sub(now))
 				} else {
-					log.Info("Building")
-
-					// TODO
-					build(&config.GitHub, patterns)
+					rmDir(tempDir, log.InfoLevel)
+					if mkDir(tempDir) {
+						log.Info("Building")
+						if script := build(&config.GitHub, patterns); script != nil {
+							log.Info("Deploying")
+							deploy(&config.Deploy, script)
+						}
+					}
 
 					nextBuild = schedule.Next(time.Now())
 
