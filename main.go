@@ -6,6 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -152,7 +153,7 @@ LoadConfig:
 					"parent": watchPath, "child": event.Name, "op": jsonableStringer{event.Op},
 				}).Trace("Got FS event")
 
-				if event.Op&^fsnotify.Chmod != 0 && event.Name == configPath {
+				if event.Op&^fsnotify.Chmod != 0 && path.Clean(event.Name) == configPath {
 					if timer != nil {
 						timer.Stop()
 					}
