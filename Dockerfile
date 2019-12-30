@@ -1,7 +1,7 @@
 FROM golang as build
 
 ADD . /src
-RUN ["/bin/bash", "-exo", "pipefail", "-c", "cd /src; go build -o /dockerweb2 ."]
+RUN ["/bin/bash", "-exo", "pipefail", "-c", "cd /src; go generate; go build -o /dockerweb2 ."]
 
 
 FROM buildpack-deps:scm

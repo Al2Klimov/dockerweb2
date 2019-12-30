@@ -1,3 +1,5 @@
+//go:generate go run github.com/Al2Klimov/go-gen-source-repos
+
 package main
 
 import (
@@ -15,6 +17,10 @@ import (
 func main() {
 	initLogging()
 	go wait4term()
+
+	log.WithFields(log.Fields{"projects": GithubcomAl2klimovGo_gen_source_repos}).Debug(
+		"For the terms of use, the source code and the authors see the projects this program is assembled from",
+	)
 
 	watcher := mkWatcher()
 
