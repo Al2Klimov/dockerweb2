@@ -146,22 +146,44 @@ func fetchGit(remote, local string, res chan<- gitRepo) {
 	latestTag := "HEAD"
 
 	{
-		latestVersion := (*version.Version)(nil)
-		for _, line := range bytes.Split(tags, []byte{'\n'}) {
-			if match := versionTag.FindSubmatch(line); match != nil {
-				ver, errNV := version.NewVersion(string(match[1]))
-				if errNV != nil {
-					log.WithFields(log.Fields{
-						"bad_version": string(match[1]), "error": jsonableError{errNV},
-					}).Warn("Something is wrong with a version")
-					continue
-				}
+		latestFinalTag := ""
+		latestPreTag := ""
 
-				if latestVersion == nil || ver.GreaterThan(latestVersion) {
-					latestVersion = ver
-					latestTag = string(line)
+		{
+			latestFinal := (*version.Version)(nil)
+			latestPre := (*version.Version)(nil)
+
+			for _, line := range bytes.Split(tags, []byte{'\n'}) {
+				if match := versionTag.FindSubmatch(line); match != nil {
+					ver, errNV := version.NewVersion(string(match[1]))
+					if errNV != nil {
+						log.WithFields(log.Fields{
+							"bad_version": string(match[1]), "error": jsonableError{errNV},
+						}).Warn("Something is wrong with a version")
+						continue
+					}
+
+					if ver.Prerelease() == "" {
+						if latestFinal == nil || ver.GreaterThan(latestFinal) {
+							latestFinal = ver
+							latestFinalTag = string(line)
+						}
+					} else {
+						if latestPre == nil || ver.GreaterThan(latestPre) {
+							latestPre = ver
+							latestPreTag = string(line)
+						}
+					}
 				}
 			}
+		}
+
+		if latestFinalTag == "" {
+			if latestPreTag != "" {
+				latestTag = latestPreTag
+			}
+		} else {
+			latestTag = latestFinalTag
 		}
 	}
 

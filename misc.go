@@ -32,7 +32,7 @@ var tempChild = path.Join(tempDir, "*")
 var noInterrupt sync.RWMutex
 var background = context.Background()
 var execSemaphore = semaphore.NewWeighted(int64(runtime.GOMAXPROCS(0)) * 2)
-var versionTag = regexp.MustCompile(`\Av?(\d+(?:\.\d+)*)\z`)
+var versionTag = regexp.MustCompile(`\Av?(.+?)\z`)
 
 var logLevels = func() *lev.ClosestMatch {
 	asStrs := make([]string, 0, len(log.AllLevels))
