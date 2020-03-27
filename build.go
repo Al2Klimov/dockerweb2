@@ -196,7 +196,12 @@ func fetchGit(remote, local string, res chan<- gitRepo) {
 
 	latestTagCommit, ok := runCmd("git", "-C", local, "log", "-1", "--format=%H", latestTag)
 	if !ok {
-		res <- gitRepo{}
+		if latestTag == "HEAD" {
+			res <- gitRepo{remote, latestTag, latestTag}
+		} else {
+			res <- gitRepo{}
+		}
+
 		return
 	}
 
