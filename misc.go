@@ -76,8 +76,7 @@ func (jblla jsonableBadLogLevelAlt) MarshalText() (text []byte, err error) {
 }
 
 type modConfig struct {
-	User  string   `yaml:"user"`
-	Repos []string `yaml:"repos"`
+	User string `yaml:"user"`
 }
 
 type githubConfig struct {

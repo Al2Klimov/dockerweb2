@@ -9,7 +9,6 @@ import (
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"path"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -33,7 +32,6 @@ LoadConfig:
 		var nextBuild time.Time
 		var timer *time.Timer = nil
 		var timerCh <-chan time.Time = nil
-		patterns := map[string]*regexp.Regexp{}
 
 		{
 			if config, ok = loadConfig(); ok {
@@ -75,35 +73,6 @@ LoadConfig:
 						log.WithFields(log.Fields{"mods_idx": i}).Error("Organization missing")
 						ok = false
 					}
-
-					if len(mod.Repos) == 0 {
-						log.WithFields(log.Fields{"mods_idx": i}).Error("Repository patterns missing")
-						ok = false
-					} else {
-						for _, repo := range mod.Repos {
-							if _, ok := patterns[repo]; !ok {
-								if rgx, errRC := regexp.Compile(repo); errRC == nil {
-									if rgx.NumSubexp() == 1 {
-										patterns[repo] = rgx
-									} else {
-										log.WithFields(log.Fields{
-											"bad_pattern": repo, "subpatterns": rgx.NumSubexp(),
-										}).Error("Repository pattern with not exactly one subpattern")
-
-										patterns[repo] = nil
-										ok = false
-									}
-								} else {
-									log.WithFields(log.Fields{
-										"bad_pattern": repo, "error": jsonableError{errRC},
-									}).Error("Bad repository pattern")
-
-									patterns[repo] = nil
-									ok = false
-								}
-							}
-						}
-					}
 				}
 
 				if strings.TrimSpace(config.Deploy.Remote) == "" {
@@ -143,7 +112,7 @@ LoadConfig:
 					rmDir(tempDir, log.InfoLevel)
 					if mkDir(tempDir) {
 						log.Info("Building")
-						if script := build(&config.GitHub, patterns); script != nil {
+						if script := build(&config.GitHub); script != nil {
 							log.Info("Deploying")
 							deploy(&config.Deploy, script)
 						}
