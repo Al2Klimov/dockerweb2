@@ -178,10 +178,10 @@ func fetchGit(remote, local string, res chan<- gitRepo) {
 	}
 
 	latestTag := "HEAD"
+	latestPreTag := ""
 
 	{
 		latestFinalTag := ""
-		latestPreTag := ""
 
 		{
 			latestFinal := (*version.Version)(nil)
@@ -237,73 +237,94 @@ func fetchGit(remote, local string, res chan<- gitRepo) {
 	latestTagCommit = bytes.TrimSpace(latestTagCommit)
 	log.WithFields(log.Fields{"remote": remote, "commit": string(latestTagCommit)}).Trace("Got latest tag's commit")
 
-	moduleName := ""
+	moduleName, ok := getModName(local, remote, latestTag)
+	if !ok {
+		res <- gitRepo{}
+		return
+	}
 
-	{
-		lsModInfo, ok := runCmd("git", "-C", local, "ls-tree", "--name-only", latestTag, "module.info")
-		if !ok {
-			res <- gitRepo{}
-			return
-		}
-
-		if len(lsModInfo) < 1 {
-			log.WithFields(log.Fields{"remote": remote, "tag": latestTag}).Trace("No module.info file found")
-		} else {
-			modInfoTar, ok := runCmd("git", "-C", local, "archive", latestTag, "module.info")
+	if moduleName == "" && latestTag != "HEAD" {
+		if latestPreTag != "" && latestPreTag != latestTag {
+			moduleName, ok = getModName(local, remote, latestPreTag)
 			if !ok {
 				res <- gitRepo{}
 				return
 			}
+		}
 
-			var buf bytes.Buffer
-
-			buf.Write(modInfoTar)
-			modInfoTar = nil
-
-			tr := tar.NewReader(&buf)
-
-			for {
-				th, errTN := tr.Next()
-
-				if errTN != nil {
-					log.WithFields(log.Fields{
-						"remote": remote, "tag": latestTag, "error": jsonableError{errTN},
-					}).Error("Got bad output from git archive")
-
-					res <- gitRepo{}
-					return
-				}
-
-				if th.Name == "module.info" {
-					var buf bytes.Buffer
-					if _, errCp := io.Copy(&buf, tr); errCp != nil {
-						log.WithFields(log.Fields{
-							"remote": remote, "tag": latestTag, "error": jsonableError{errCp},
-						}).Error("Got bad output from git archive")
-
-						res <- gitRepo{}
-						return
-					}
-
-					if match := modName.FindSubmatch(buf.Bytes()); match == nil {
-						log.WithFields(log.Fields{
-							"remote": remote, "tag": latestTag,
-						}).Trace("module.info file doesn't name any module")
-					} else {
-						moduleName = string(match[1])
-
-						log.WithFields(log.Fields{
-							"remote": remote, "tag": latestTag, "module": moduleName,
-						}).Trace("module.info file names a module")
-					}
-
-					break
-				}
+		if moduleName == "" {
+			moduleName, ok = getModName(local, remote, "HEAD")
+			if !ok {
+				res <- gitRepo{}
+				return
 			}
 		}
 	}
 
 	res <- gitRepo{remote, latestTag, string(latestTagCommit), moduleName}
+}
+
+func getModName(local, remote, tag string) (name string, ok bool) {
+	lsModInfo, ok := runCmd("git", "-C", local, "ls-tree", "--name-only", tag, "module.info")
+	if !ok {
+		return "", tag == "HEAD"
+	}
+
+	if len(lsModInfo) < 1 {
+		log.WithFields(log.Fields{"remote": remote, "tag": tag}).Trace("No module.info file found")
+		return "", true
+	}
+
+	modInfoTar, ok := runCmd("git", "-C", local, "archive", tag, "module.info")
+	if !ok {
+		return "", false
+	}
+
+	var buf bytes.Buffer
+
+	buf.Write(modInfoTar)
+	modInfoTar = nil
+
+	tr := tar.NewReader(&buf)
+
+	for {
+		th, errTN := tr.Next()
+
+		if errTN != nil {
+			log.WithFields(log.Fields{
+				"remote": remote, "tag": tag, "error": jsonableError{errTN},
+			}).Error("Got bad output from git archive")
+
+			return "", false
+		}
+
+		if th.Name == "module.info" {
+			var buf bytes.Buffer
+			if _, errCp := io.Copy(&buf, tr); errCp != nil {
+				log.WithFields(log.Fields{
+					"remote": remote, "tag": tag, "error": jsonableError{errCp},
+				}).Error("Got bad output from git archive")
+
+				return "", false
+			}
+
+			if match := modName.FindSubmatch(buf.Bytes()); match == nil {
+				log.WithFields(log.Fields{
+					"remote": remote, "tag": tag,
+				}).Trace("module.info file doesn't name any module")
+
+				return "", true
+			} else {
+				moduleName := string(match[1])
+
+				log.WithFields(log.Fields{
+					"remote": remote, "tag": tag, "module": moduleName,
+				}).Trace("module.info file names a module")
+
+				return moduleName, true
+			}
+		}
+	}
 }
 
 func fetchMods(mods []modConfig) map[string][2]string {
