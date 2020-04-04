@@ -29,6 +29,11 @@ func build(config *githubConfig, patterns map[string]*regexp.Regexp) (script []b
 		reposByDir[hex.EncodeToString([]byte(repo))] = repo
 	}
 
+	for repo := range unknown {
+		repo := fmt.Sprintf("%s/%s", repo.Owner, repo.Name)
+		reposByDir[hex.EncodeToString([]byte(repo))] = repo
+	}
+
 	chUpd := make(chan map[string]gitRepo, 1)
 	chRm := make(chan struct{})
 

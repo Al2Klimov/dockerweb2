@@ -2,13 +2,32 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"os/exec"
+	"path"
 	"sort"
 )
 
 func notify(config notifyConfig, unknown map[unknownRepo]struct{}) {
+	{
+		noModInfo := map[unknownRepo]struct{}{}
+		for repo := range unknown {
+			lsModInfo, ok := runCmd("git", "-C", path.Join(
+				gitMirrorPath, hex.EncodeToString([]byte(fmt.Sprintf("%s/%s", repo.Owner, repo.Name))),
+			), "ls-tree", "--name-only", "HEAD", "module.info")
+
+			if ok && len(lsModInfo) < 1 {
+				noModInfo[repo] = struct{}{}
+			}
+		}
+
+		for repo := range noModInfo {
+			delete(unknown, repo)
+		}
+	}
+
 	if len(unknown) > 0 {
 		orderedUnknown := make([]unknownRepo, 0, len(unknown))
 		for repo := range unknown {
