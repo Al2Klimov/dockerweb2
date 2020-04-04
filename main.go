@@ -143,9 +143,11 @@ LoadConfig:
 					rmDir(tempDir, log.InfoLevel)
 					if mkDir(tempDir) {
 						log.Info("Building")
-						if script := build(&config.GitHub, patterns); script != nil {
+						if script, unknown := build(&config.GitHub, patterns); script != nil {
 							log.Info("Deploying")
 							deploy(&config.Deploy, script)
+
+							notify(config.Notify, unknown)
 						}
 					}
 

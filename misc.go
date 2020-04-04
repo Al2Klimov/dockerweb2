@@ -92,6 +92,10 @@ type deployConfig struct {
 	Commit string            `yaml:"commit"`
 }
 
+type notifyConfig struct {
+	SNail string `yaml:"s_nail"`
+}
+
 type configuration struct {
 	Log struct {
 		Level string `yaml:"level"`
@@ -101,6 +105,7 @@ type configuration struct {
 	} `yaml:"build"`
 	GitHub githubConfig `yaml:"github"`
 	Deploy deployConfig `yaml:"deploy"`
+	Notify notifyConfig `yaml:"notify"`
 }
 
 func initLogging() {
@@ -188,4 +193,9 @@ func rename(old, new string) bool {
 
 func waitFor(ch <-chan struct{}) {
 	<-ch
+}
+
+type unknownRepo struct {
+	Owner string `json:"owner"`
+	Name  string `json:"name"`
 }

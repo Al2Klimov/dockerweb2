@@ -15,14 +15,16 @@ That script is suitable for building an Icinga Web 2 Docker image.
 2. Prepare SSH:
 
 ```bash
-mkdir dockerweb2-data/ssh
-ssh-keygen -q -b 4096 -t rsa -N '' -C bot@example.com -f dockerweb2-data/ssh/id_rsa
-ssh-keyscan git.example.com > dockerweb2-data/ssh/known_hosts
+mkdir dockerweb2-data/.ssh
+ssh-keygen -q -b 4096 -t rsa -N '' -C bot@example.com -f dockerweb2-data/.ssh/id_rsa
+ssh-keyscan git.example.com > dockerweb2-data/.ssh/known_hosts
 ```
 
-3. Add `dockerweb2-data/ssh/id_rsa.pub` as a deploy key
+3. Add `dockerweb2-data/.ssh/id_rsa.pub` as a deploy key
    with write access to the Git repository
-4. Create `dockerweb2-data/config.yml`:
+4. Optionally create `dockerweb2-data/.mailrc` which sets all variables
+   s-nail needs to send e-mails
+5. Create `dockerweb2-data/config.yml`:
 
 ```yaml
 #log:
@@ -47,14 +49,16 @@ deploy:
   remote: 'git@git.example.com:jdoe/icingaweb2-docker.git'
   # Git config
   config:
-    core.sshCommand: |-
-      ssh -i /data/ssh/id_rsa -o UserKnownHostsFile=/data/ssh/known_hosts
     user.name: JD-OE Bot
     user.email: bot@example.com
   # Script name
   script: get-iw2.sh
   # Commit message
   commit: Update get-iw2.sh
+#notify:
+  # Who to notify about repos not covered by the configured patterns
+  # via e-mail (s-nail)
+  #s_nail: jdoe@example.com
 ```
 
 The daemon reloads its config automatically.

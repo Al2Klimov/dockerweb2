@@ -16,10 +16,10 @@ import (
 	"sync"
 )
 
-func build(config *githubConfig, patterns map[string]*regexp.Regexp) []byte {
-	mods := fetchMods(config.Mods, patterns)
+func build(config *githubConfig, patterns map[string]*regexp.Regexp) (script []byte, unknown map[unknownRepo]struct{}) {
+	mods, unknown := fetchMods(config.Mods, patterns)
 	if mods == nil {
-		return nil
+		return nil, nil
 	}
 
 	reposByDir := make(map[string]string, 1+len(mods))
@@ -39,7 +39,7 @@ func build(config *githubConfig, patterns map[string]*regexp.Regexp) []byte {
 
 	updated := <-chUpd
 	if updated == nil {
-		return nil
+		return nil, nil
 	}
 
 	var buf bytes.Buffer
@@ -89,7 +89,7 @@ fi
 rm -rf dockerweb2-temp
 `)
 
-	return buf.Bytes()
+	return buf.Bytes(), unknown
 }
 
 type gitRepo struct {
@@ -201,7 +201,9 @@ func fetchGit(remote, local string, res chan<- gitRepo) {
 	res <- gitRepo{remote, latestTag, string(latestTagCommit)}
 }
 
-func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp) map[string]string {
+func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp) (
+	hits map[string]string, unknown map[unknownRepo]struct{},
+) {
 	gh := github.NewClient(nil)
 	chUsers := make(chan githubUser, len(mods))
 
@@ -222,7 +224,15 @@ func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp) map[string]
 		}
 
 		if !ok {
-			return nil
+			return nil, nil
+		}
+	}
+
+	unknown = map[unknownRepo]struct{}{}
+
+	for user, reposOfUser := range repos {
+		for _, repo := range reposOfUser {
+			unknown[unknownRepo{user, repo}] = struct{}{}
 		}
 	}
 
@@ -235,16 +245,20 @@ func fetchMods(mods []modConfig, patterns map[string]*regexp.Regexp) map[string]
 			rgx := patterns[repo]
 
 			for _, ourRepo := range ourRepos {
-				if match := rgx.FindStringSubmatch(ourRepo); match != nil && strings.TrimSpace(match[1]) != "" {
-					if _, ok := reposOfMods[match[1]]; !ok {
-						reposOfMods[match[1]] = fmt.Sprintf("%s/%s", mod.User, ourRepo)
+				if match := rgx.FindStringSubmatch(ourRepo); match != nil {
+					if strings.TrimSpace(match[1]) != "" {
+						if _, ok := reposOfMods[match[1]]; !ok {
+							reposOfMods[match[1]] = fmt.Sprintf("%s/%s", mod.User, ourRepo)
+						}
 					}
+
+					delete(unknown, unknownRepo{mod.User, ourRepo})
 				}
 			}
 		}
 	}
 
-	return reposOfMods
+	return reposOfMods, unknown
 }
 
 type githubUser struct {
