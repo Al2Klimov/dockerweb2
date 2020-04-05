@@ -15,8 +15,10 @@ RUN apt-get update ;\
 
 COPY --from=build /dockerweb2 /dockerweb2
 
-RUN adduser --system --group --home /data --disabled-login --force-badname dockerweb2
-USER dockerweb2
+RUN mkdir /data ;\
+	rm -rf ~ ;\
+	ln -vs /data ~
+
 WORKDIR /data
 
 CMD ["/dockerweb2"]
