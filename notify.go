@@ -70,7 +70,7 @@ Please configure additional patterns which cover them by either including ( \Aiw
 
 			if errRn := cmd.Run(); errRn != nil {
 				log.WithFields(log.Fields{
-					"email": config.SNail, "error": jsonableError{errRn},
+					"email": config.SNail, "error": jsonableError{errRn}, "output": jsonableStringer{&out},
 				}).Error("Couldn't notify via s-nail")
 			}
 		}
