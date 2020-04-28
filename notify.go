@@ -18,7 +18,7 @@ func notify(config notifyConfig, unknown map[unknownRepo]struct{}) {
 				gitMirrorPath, hex.EncodeToString([]byte(fmt.Sprintf("%s/%s", repo.Owner, repo.Name))),
 			), "ls-tree", "--name-only", "HEAD", "module.info")
 
-			if ok && len(lsModInfo) < 1 {
+			if !ok || len(lsModInfo) < 1 {
 				noModInfo[repo] = struct{}{}
 			}
 		}
