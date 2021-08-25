@@ -3,8 +3,7 @@ module dockerweb2
 go 1.13
 
 require (
-	github.com/Al2Klimov/go-gen-source-repos v0.0.0-20191012103425-993a7199781c // indirect
-	github.com/fsnotify/fsnotify v1.4.9
+	github.com/fsnotify/fsnotify v1.5.1
 	github.com/google/go-github/v28 v28.1.1
 	github.com/hashicorp/go-version v1.3.0
 	github.com/robfig/cron/v3 v3.0.1
